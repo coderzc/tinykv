@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
@@ -43,30 +42,74 @@ func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kv
 		response.Error = err.Error()
 		return response, err
 	}
-	val, err := reader.GetCF(req.Cf, req.Key)
 	defer reader.Close()
+	val, err := reader.GetCF(req.Cf, req.Key)
 	if err != nil {
 		response.Error = err.Error()
 		return response, err
 	}
 	response.Value = val
-	response.NotFound = val != nil
+	response.NotFound = val == nil
 	return response, nil
 }
 
 func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
-	// Your Code Here (1).
-	return nil, nil
+	response := &kvrpcpb.RawPutResponse{}
+	modify := storage.Modify{
+		Data: storage.Put{
+			Key:   req.Key,
+			Value: req.Value,
+			Cf:    req.Cf,
+		},
+	}
+	err := server.storage.Write(req.Context, []storage.Modify{modify})
+	if err != nil {
+		response.Error = err.Error()
+		return response, err
+	}
+	return response, nil
 }
 
 func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
-	// Your Code Here (1).
+	response := &kvrpcpb.RawDeleteResponse{}
+	modify := storage.Modify{
+		Data: storage.Delete{
+			Key: req.Key,
+			Cf:  req.Cf,
+		},
+	}
+	err := server.storage.Write(req.Context, []storage.Modify{modify})
+	if err != nil {
+		response.Error = err.Error()
+		return response, err
+	}
 	return nil, nil
 }
 
 func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
-	// Your Code Here (1).
-	return nil, nil
+	response := &kvrpcpb.RawScanResponse{}
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		response.Error = err.Error()
+		return response, err
+	}
+	iter := reader.IterCF(req.Cf)
+	defer iter.Close()
+
+	var resultKvs []*kvrpcpb.KvPair
+	for iter.Seek(req.StartKey); iter.Valid(); iter.Next() {
+		if len(resultKvs) == int(req.Limit) {
+			break
+		}
+		item := iter.Item()
+		val, err := item.Value()
+		if err != nil {
+			return nil, err
+		}
+		resultKvs = append(resultKvs, &kvrpcpb.KvPair{Key: item.Key(), Value: val})
+	}
+	response.Kvs = resultKvs
+	return response, nil
 }
 
 // Raft commands (tinykv <-> tinykv)

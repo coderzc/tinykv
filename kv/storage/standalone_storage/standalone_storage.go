@@ -6,6 +6,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/config"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/kv/storage/raft_storage"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"log"
@@ -46,27 +47,29 @@ func (s *StandAloneStorage) Stop() error {
 }
 
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
-	region := metapb.Region{
-		Id:          ctx.RegionId,
-		RegionEpoch: ctx.RegionEpoch,
-		Peers:       []*metapb.Peer{ctx.Peer},
+	region := metapb.Region{}
+	if ctx != nil {
+		region = metapb.Region{
+			Id:          ctx.RegionId,
+			RegionEpoch: ctx.RegionEpoch,
+			Peers:       []*metapb.Peer{ctx.Peer},
+		}
 	}
+
 	txn := s.NewTransaction(false)
 	regionReader := raft_storage.NewRegionReader(txn, region)
 	return regionReader, nil
 }
 
 func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) error {
-	txn := s.NewTransaction(true)
-	defer txn.Commit()
 	for _, data := range batch {
 		switch data.Data.(type) {
 		case storage.Put:
-			if err := txn.Set(data.Key(), data.Value()); err != nil {
+			if err := engine_util.PutCF(s.DB, data.Cf(), data.Key(), data.Value()); err != nil {
 				return err
 			}
 		case storage.Delete:
-			if err := txn.Delete(data.Key()); err != nil {
+			if err := engine_util.DeleteCF(s.DB, data.Cf(), data.Key()); err != nil {
 				return err
 			}
 		default:
