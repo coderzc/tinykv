@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"time"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -182,7 +183,27 @@ func (r *Raft) sendHeartbeat(to uint64) {
 
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
-	// Your Code Here (2A).
+	var timeout time.Duration
+	leader := true
+	if r.State != StateLeader {
+		timeout = time.Duration(r.electionTimeout)
+		leader = true
+	} else {
+		timeout = time.Duration(r.heartbeatTimeout)
+		leader = false
+	}
+	tick := time.Tick(timeout)
+	for {
+		select {
+		case <-tick:
+			if leader {
+				r.electionElapsed--
+			} else {
+				r.heartbeatElapsed--
+			}
+			break
+		}
+	}
 }
 
 // becomeFollower transform this peer's state to Follower
